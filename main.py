@@ -695,7 +695,9 @@ async def on_message(message):
 f"""Commands:```
 {PREFIX}help
 	Show this help text
-{PREFIX}create
+{PREFIX}instructions
+	Show the instructions
+{PREFIX}create [word count] [greens for edit] [grays for edit] [write time] [guess time] [hard words] [auto guess] [keyboard]
 	Create a new game
 {PREFIX}join
 	Join a starting game
@@ -705,6 +707,13 @@ f"""Commands:```
 	Abort the current game```
 """
 		)
+	elif command == 'instructions':
+		await message.channel.send(files=[
+			discord.File('instructionsA.png'),
+			discord.File('instructionsB.png'),
+			discord.File('instructionsC.png'),
+			discord.File('instructionsD.png')
+		])
 	elif game["stage"] >= 1:
 		if message.channel == game["channel"]:
 			await handleGameMessage(message)
