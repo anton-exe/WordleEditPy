@@ -24,8 +24,9 @@ async def processGuessingSubmission(game, player_index, receivedMessage):
 	if len(word) == 5:
 		game["guesses"][player_index].append(word)
 		if not await hasEveryoneFinishedGuessing(game):
-			v = await game["player_list"][player_index].send(_alert)
-			await game["waiting_messages_to_delete"].append(v)
+			await game["player_list"][player_index].send(_alert)
+			# v = await game["player_list"][player_index].send(_alert)
+			# await game["waiting_messages_to_delete"].append(v)
 	else:
 		await game["player_list"][player_index].send(_alert)
 
@@ -44,7 +45,7 @@ async def processEditingSubmission(game, player_index, receivedMessage):
 	if len(newWord) == 5:
 		editCost = await getEditCost(origWord,newWord)
 		if editCost > game["edits"][player_index]:
-			await game["player_list"][player_index].send("TOO POOR. You only have "+(await pluralize(game["edits"][player_index]),"edit")+" in the bank, but editing your "+(await rankify(wordOn))+" word from "+(await formatWord(origWord, True, False))+" to "+(await formatWord(newWord, True, False))+" would cost you "+(await pluralize(editCost,"edit"))+".")
+			await game["player_list"][player_index].send("TOO POOR. You only have "+(await pluralize(game["edits"][player_index], "edit"))+" in the bank, but editing your "+(await rankify(wordOn))+" word from "+(await formatWord(origWord, True, False))+" to "+(await formatWord(newWord, True, False))+" would cost you "+(await pluralize(editCost, "edit"))+".")
 		else:
 			game["words"][player_index][wordOn] = newWord
 			game["most_recent_edit"][player_index] = game["round_count"]
@@ -60,7 +61,7 @@ async def processEditingSubmission(game, player_index, receivedMessage):
 async def getEditCost(a, b):
 	count = 0
 	for i in range(5):
-		if a[i] == b[i]:
+		if a[i] != b[i]:
 			count += 1
 	return count
 
@@ -164,6 +165,8 @@ async def handleGameMessage(message):
 				game["most_recent_edit"].append(-1)
 				game["most_recent_new_word"].append(-1)
 
+				game["won"].append(False)
+
 				await mc.send(author.name+" just joined the game. "+
 					"\nPlayer count: "+str((len(game["player_list"]))))
 		else:
@@ -191,6 +194,9 @@ async def abort(game, message):
 		intervalFunc = None
 	await alertChannelAndPlayers(game, message)
 	game["stage"] = 0
+
+	global client
+	await client.change_presence(status=discord.Status.idle, activity=None)
 
 async def alertChannelAndPlayers(game, stri):
 	await game["channel"].send(stri)
@@ -221,6 +227,9 @@ async def startGame(game, args):
 			time.sleep(2)
 	stopFlag = False
 	intervalFunc = threading.Thread(target=setUpInterval)
+
+	global client
+	await client.change_presence(status=discord.Status.online, activity=discord.Game("WordleEditPy!"))
 
 async def wrapUpWritingStageBecauseTimeRanOut(game):
 	LEN = len(game["player_list"])
@@ -259,6 +268,9 @@ async def startGuessingStage(game):
 	game["round_count"] = 1
 	await alertChannelAndPlayers(game, "All players have submitted their words. Time for the guessing stage to begin.")
 
+	for i in range(len(game["player_list"])):
+		game["words"][i].append('*****')
+
 	await startGuessingTurn(game)
 
 async def startGuessingTurn(game):
@@ -294,6 +306,8 @@ async def countGreens(code):
 	return count
 
 async def calculatePlayersRoundPerformance(game, p_i, r, LEN):
+	if game["won"][p_i]:
+		return
 	pgc = len(game["guesses"][p_i])
 	pc = game["player_list"][p_i]
 	if pgc < game["round_count"]:
@@ -344,15 +358,24 @@ async def finishGuessingTurn(game):
 	for p_i in range(LEN):
 		await game["player_list"][p_i].send(await formatRoundResult(game, r, p_i))
 
-	finishers = []
+	finished = game["won"]
 	for p_i in range(LEN):
 		if game["codes"][p_i][r] == "ccccc":
 			prevI = (p_i+LEN-1)%LEN
 			prevP = game["player_list"][prevI]
 			wordOn = game["word_on"][p_i]
-			if wordOn >= game["word_count"]-1:
-				finishers.append(p_i)
-			if game["word_on"][p_i] < game["word_count"]-1:
+			if wordOn == game["word_count"]-1:
+				finished[p_i] = True
+				game["won"][p_i] = True
+				await game["player_list"][p_i].send("You're done!")
+				game["word_on"][p_i] += 1
+				game["codes"][p_i].append("ddddd")
+				game["guesses"][p_i].append(game["guesses"][p_i][-1])
+			elif wordOn > game["word_count"]-1:
+				finished[p_i] = True
+				game["codes"][p_i].append("ddddd")
+				game["guesses"][p_i].append(game["guesses"][p_i][-1])
+			elif wordOn < game["word_count"]-1:
 				await game["player_list"][p_i].send("Congrats, you solved "+prevP.name+"'s "+(await rankify(wordOn))+" word! Guess their "+(await rankify(wordOn+1))+" one.")
 
 				game["word_on"][p_i] += 1
@@ -360,7 +383,7 @@ async def finishGuessingTurn(game):
 				game["most_recent_new_word"][p_i] = r+1
 	
 	game["round_count"] += 1
-	if len(finishers) == LEN:
+	if not (False in finished):
 		await abort(game, "All players done!")
 
 async def getTiedString(game, finishers, exclude):
@@ -442,10 +465,14 @@ async def getRemainingCharacters(game, player_i):
 		guess = game["guesses"][player_i][round]
 		code = game["codes"][player_i][round]
 		for i in range(5):
+			if code[i] == '*':
+				continue
 			if code[i] == 'a':
 				DQedLetter = ord(guess[i])-CHAR_CODE_A
 				remainingCharacterIndices[DQedLetter] = False
 		for i in range(5):
+			if code[i] == '*':
+				continue
 			if code[i] != 'a':
 				approvedLetter = ord(guess[i])-CHAR_CODE_A
 				remainingCharacterIndices[approvedLetter] = True
@@ -505,16 +532,18 @@ async def rankify(n):
 	return str(n+1)+suffix
 
 async def playerListToString(game, indexShift):
-	RESULT_STR = ""
 	LEN = len(game["player_list"])
+	RESULT_STR = ":arrow_right:   " if LEN > 2 else ""
 	for i in range(LEN):
 		if i == 1 and LEN == 2:
-			RESULT_STR += "   <--->   "
+			RESULT_STR += "   ←---→   "
 		else:
 			if i >= 1:
-				RESULT_STR += "   ---->   "
+				RESULT_STR += "   ----→   "
 		RESULT_STR += game["player_list"][(i-indexShift+LEN)%LEN].name
-		return RESULT_STR
+	if LEN > 2:
+		RESULT_STR += ":arrow_right"
+	return RESULT_STR
 
 async def formatWord(word, emojify, finalSpace):
 	if emojify:
@@ -599,13 +628,15 @@ async def newCleanGame(mc, args):
 	
 	thisGame["max_edits"] = 9
 
+	thisGame["won"] = []
+
 	return thisGame
 
 async def defaultValue(arr, index, defi):
 	if index >= len(arr):
 		return defi
 	else:
-		return arr[index]
+		return int(arr[index])
 
 async def yesNoValue(arr, index, defi):
 	if index >= len(arr):
@@ -649,6 +680,8 @@ async def on_ready():
 	print(f'We have logged in as {client.user}')
 	global game
 	game = await newCleanGame("", [])
+	
+	await client.change_presence(status=discord.Status.idle, activity=None)
 
 @client.event
 async def on_message(message):
